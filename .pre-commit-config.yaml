@@ -1,0 +1,53 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: check-executables-have-shebangs
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: detect-private-key
+
+  - repo: https://github.com/ansible/ansible-lint
+    rev: v26.11.1
+    hooks:
+      - id: ansible-lint
+        files: ^ansible/.*\.ya?ml$
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        files: ^(?!ansible/).*\.ya?ml$
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        args: [--shell=bash]
+        files: ^(scripts/.*\.sh|dotfiles/home/_config/bash\.d/.*\.sh|dotfiles/home/_(bash_profile|bashrc|profile))$
+        types: [file]
+
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.14.1-1
+    hooks:
+      - id: shfmt
+        args: [-ln=bash, -i=2]
+        files: ^(scripts/.*\.sh|dotfiles/home/_config/bash\.d/.*\.sh|dotfiles/home/_(bash_profile|bashrc|profile))$
+        types: [file]
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.50.1
+    hooks:
+      - id: markdownlint
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

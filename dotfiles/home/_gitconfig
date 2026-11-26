@@ -1,0 +1,44 @@
+[user]
+	name = Gustavo Campos
+	email = guhcampos@users.noreply.github.com
+
+[color]
+	ui = auto
+
+[core]
+	abbrev = 7
+	excludesfile = ~/.config/gitignore
+	whitespace = -trailing-space
+
+[diff]
+	algorithm = histogram
+	tool = vimdiff
+
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+
+[push]
+	default = current
+	autoSetupRemote = true
+
+[init]
+	defaultBranch = main
+
+[pull]
+	rebase = true
+
+[credential "https://github.com"]
+	helper =
+	helper = !/opt/homebrew/bin/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !/opt/homebrew/bin/gh auth git-credential
+
+# machine- and identity-specific configuration (employer workspace includes,
+# forgejo credentials, per-machine overrides) lives in an untracked local file;
+# a missing include file is silently ignored by git.
+[include]
+	path = ~/.gitconfig.local

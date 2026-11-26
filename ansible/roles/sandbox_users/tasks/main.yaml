@@ -1,0 +1,476 @@
+---
+###############################################################################
+# create headless macOS sandbox users, their dedicated groups, shared access
+# for the primary user and the minimal per-user identity/config scaffolding.
+# everything here is idempotent: re-running converges instead of recreating.
+###############################################################################
+
+- name: list the primary group ids already in use
+  # dscl -list prints "<name><tab><gid>"; keep only the gid column (shell
+  # module on purpose - the command module does not run pipes)
+  ansible.builtin.shell: dscl . -list /Groups PrimaryGroupID | awk '{print $NF}'
+  register: sandbox_group_ids
+  changed_when: false
+
+- name: read the sandbox group records
+  # full record read on purpose: a keyed read of a stub group (record exists
+  # but has no PrimaryGroupID) returns rc 0, which would be mistaken for a
+  # healthy group with a parsed gid of 0
+  ansible.builtin.command: dscl . -read /Groups/{{ item.account }}
+  register: sandbox_group_check
+  failed_when: false
+  changed_when: false
+  loop: "{{ sandbox_users }}"
+
+- name: compute the primary group id for each sandbox group
+  ansible.builtin.set_fact:
+    sandbox_gids: >-
+      {%- set ns = namespace(gids={}, used=(sandbox_group_ids.stdout_lines | map('int') | list)) -%}
+      {%- for user, check in (sandbox_users | zip(sandbox_group_check.results | list)) -%}
+      {%- if check.rc == 0 and 'PrimaryGroupID:' in check.stdout -%}
+      {%- set _ = ns.gids.update({user.account: check.stdout.split('PrimaryGroupID:')[1].split('\n')[0] | trim | int}) -%}
+      {%- else -%}
+      {%- set gid = range(1000, 2000) | list | difference(ns.used) | first -%}
+      {%- set _ = ns.gids.update({user.account: gid}) -%}
+      {%- set _ = ns.used.append(gid) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ ns.gids }}
+
+- name: create or heal the sandbox groups (covers stub records without a gid)
+  ansible.builtin.command:
+    argv:
+      - dscl
+      - .
+      - -create
+      - /Groups/{{ item.account }}
+      - PrimaryGroupID
+      - "{{ sandbox_gids[item.account] }}"
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: group_idx
+    label: "{{ item.account }}"
+  when:
+    - sandbox_group_check.results[group_idx].rc != 0 or 'PrimaryGroupID:' not in sandbox_group_check.results[group_idx].stdout
+
+- name: check which sandbox users already exist
+  ansible.builtin.command: dscl . -read /Users/{{ item.account }}
+  register: sandbox_user_check
+  failed_when: false
+  changed_when: false
+  loop: "{{ sandbox_users }}"
+
+- name: generate a random password for each missing sandbox user
+  ansible.builtin.set_fact:
+    sandbox_passwords: >-
+      {{ (sandbox_passwords | default({}))
+         | combine({ item.account: lookup('ansible.builtin.password', '/dev/null chars=ascii_letters,digits length=32') }) }}
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: user_idx
+    label: "{{ item.account }}"
+  when: sandbox_user_check.results[user_idx].rc != 0
+
+- name: create the missing sandbox users (headless, random password)
+  ansible.builtin.command:
+    argv:
+      - sysadminctl
+      - -addUser
+      - "{{ item.account }}"
+      - -password
+      - "{{ sandbox_passwords[item.account] }}"
+      - -home
+      - /Users/{{ item.account }}
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: user_idx
+    label: "{{ item.account }}"
+  when: sandbox_user_check.results[user_idx].rc != 0
+  no_log: true
+
+- name: report the sandbox user passwords (store them in 1Password)
+  ansible.builtin.debug:
+    msg: >-
+      sandbox user {{ item.item.account }} was created with password
+      {{ sandbox_passwords[item.item.account] }} - store it in 1Password now,
+      it will NOT be shown again.
+  loop: "{{ sandbox_user_check.results }}"
+  loop_control:
+    label: "{{ item.item.account }}"
+  when:
+    - item.rc != 0
+    - sandbox_passwords is defined
+
+- name: read the sandbox user records
+  ansible.builtin.command:
+    argv:
+      - dscl
+      - .
+      - -read
+      - /Users/{{ item.account }}
+      - UserShell
+      - RealName
+      - IsHidden
+      - PrimaryGroupID
+  register: sandbox_user_records
+  changed_when: false
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"
+
+- name: normalize the record output
+  # dscl wraps long attribute values onto continuation lines (e.g. RealName
+  # prints its value on the next line), which breaks substring matching
+  ansible.builtin.set_fact:
+    sandbox_user_records_stdout: "{{ sandbox_user_records.results | map(attribute='stdout') | map('replace', '\n ', ' ') | list }}"
+
+- name: fix the sandbox user login shell
+  ansible.builtin.command:
+    argv: [dscl, ., -create, "/Users/{{ item.account }}", UserShell, /bin/bash]
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: user_idx
+    label: "{{ item.account }}"
+  when: "sandbox_user_records_stdout[user_idx] is not search('UserShell: /bin/bash')"
+
+- name: fix the sandbox user real name
+  ansible.builtin.command:
+    argv: [dscl, ., -create, "/Users/{{ item.account }}", RealName, "Workspace sandbox - {{ item.profile }}"]
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: user_idx
+    label: "{{ item.account }}"
+  when: "sandbox_user_records_stdout[user_idx] is not search('RealName: Workspace sandbox - ' ~ item.profile)"
+
+- name: hide the sandbox users at the login window
+  ansible.builtin.command:
+    argv: [dscl, ., -create, "/Users/{{ item.account }}", IsHidden, 1]
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: user_idx
+    label: "{{ item.account }}"
+  when: "sandbox_user_records_stdout[user_idx] is not search('IsHidden: 1')"
+
+- name: point the sandbox user primary group at the dedicated group
+  ansible.builtin.command:
+    argv: [dscl, ., -create, "/Users/{{ item.account }}", PrimaryGroupID, "{{ sandbox_gids[item.account] }}"]
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: user_idx
+    label: "{{ item.account }}"
+  when: "sandbox_user_records_stdout[user_idx] is not search('PrimaryGroupID: ' ~ sandbox_gids[item.account])"
+
+- name: check which sandbox homes already exist
+  ansible.builtin.stat:
+    path: /Users/{{ item.account }}
+  loop: "{{ sandbox_users }}"
+  register: sandbox_home_check
+
+- name: create the missing sandbox home directories
+  ansible.builtin.command: createhomedir -c -u {{ item.account }}
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: home_idx
+    label: "{{ item.account }}"
+  when: not sandbox_home_check.results[home_idx].stat.exists
+
+- name: hand home directories with wrong ownership to the sandbox user
+  # runs for freshly created homes AND for existing homes whose group is not
+  # the dedicated sandbox group (e.g. wheel after a partial run). macOS may
+  # protect its Address Book preference file even from privileged chown; allow
+  # only that known error and still fail on any other ownership problem.
+  ansible.builtin.command:
+    argv:
+      - chown
+      - -R
+      - "{{ item.account }}:{{ item.account }}"
+      - "/Users/{{ item.account }}"
+  register: sandbox_home_chown
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: home_idx
+    label: "{{ item.account }}"
+  when: >-
+    (not sandbox_home_check.results[home_idx].stat.exists)
+    or (sandbox_home_check.results[home_idx].stat.gid | default(0)) != (sandbox_gids[item.account])
+  failed_when: >-
+    sandbox_home_chown.rc != 0 and
+    (
+      sandbox_home_chown.stderr_lines | length == 0 or
+      sandbox_home_chown.stderr_lines
+      | reject('equalto', 'chown: /Users/' ~ item.account ~ '/Library/Preferences/com.apple.AddressBook.plist: Operation not permitted')
+      | list | length > 0
+    )
+
+- name: set group ownership and the setgid bit on the home directory
+  ansible.builtin.file:
+    path: /Users/{{ item.account }}
+    state: directory
+    owner: "{{ item.account }}"
+    group: "{{ item.account }}"
+    mode: "2770"
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"
+
+- name: strip the acl entries from the desktop-oriented template directories
+  # the macOS user template ships e.g. Pictures with a "group:everyone deny
+  # delete" ace, which blocks removal even for root; strip acls before deleting
+  ansible.builtin.command: chmod -N /Users/{{ entry.0.account }}/{{ entry.1 }}
+  vars:
+    home_template_dirs: [Desktop, Documents, Downloads, Movies, Music, Public]
+  failed_when: false
+  changed_when: false
+  loop: "{{ sandbox_users | product(home_template_dirs) | list }}"
+  loop_control:
+    loop_var: entry
+    label: "{{ entry.0.account }}/{{ entry.1 }}"
+
+- name: remove the desktop-oriented template directories from the sandbox homes
+  # these come from the macOS user template when the account/home is created;
+  # headless agent accounts have no GUI session to recreate them. ~/Library is
+  # kept on purpose (cfprefsd, app caches, opencode state live there).
+  vars:
+    home_template_dirs: [Desktop, Documents, Downloads, Movies, Music, Public]
+  ansible.builtin.file:
+    path: /Users/{{ entry.0.account }}/{{ entry.1 }}
+    state: absent
+  loop: "{{ sandbox_users | product(home_template_dirs) | list }}"
+  loop_control:
+    loop_var: entry
+    label: "{{ entry.0.account }}/{{ entry.1 }}"
+
+- name: template the workspace root .envrc baseline
+  # force: false - entries added below the baseline are the user's and are
+  # never clobbered; a deleted file is recreated with the baseline only
+  ansible.builtin.template:
+    src: _envrc
+    dest: /Users/{{ item.account }}/.envrc
+    owner: "{{ item.account }}"
+    group: "{{ item.account }}"
+    mode: "0644"
+    force: false
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"
+
+- name: make sure the workspace root .envrc sources .env.secrets
+  # insertbefore BOF keeps the managed line at the top and any workspace
+  # entries the user added below it untouched
+  ansible.builtin.lineinfile:
+    path: /Users/{{ item.account }}/.envrc
+    line: "source_env .env.secrets"
+    insertbefore: BOF
+    create: true
+    owner: "{{ item.account }}"
+    group: "{{ item.account }}"
+    mode: "0644"
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"
+
+- name: create the .env.secrets file when missing
+  ansible.builtin.copy:
+    content: |
+      #!/bin/bash
+      # per-profile secrets sourced by .envrc. keep this file out of any repo.
+    dest: /Users/{{ item.account }}/.env.secrets
+    owner: "{{ item.account }}"
+    group: "{{ item.account }}"
+    mode: "0600"
+    force: false
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"
+
+- name: enforce 0600 on the .env.secrets files
+  ansible.builtin.file:
+    path: /Users/{{ item.account }}/.env.secrets
+    owner: "{{ item.account }}"
+    group: "{{ item.account }}"
+    mode: "0600"
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"
+
+- name: read the current home directory acl entries
+  ansible.builtin.command: ls -lde /Users/{{ item.account }}
+  register: sandbox_home_acls
+  changed_when: false
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"
+
+- name: grant the primary user inherited access on the home directory (fresh acl)
+  ansible.builtin.command:
+    argv:
+      - chmod
+      - +a
+      - "{{ sandbox_acl_entry }}"
+      - /Users/{{ item.account }}
+  vars:
+    sandbox_acl_entry: "{{ primary_user }} allow list,search,add_file,add_subdirectory,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit"
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: acl_idx
+    label: "{{ item.account }}"
+  when:
+    - "sandbox_home_acls.results[acl_idx].stdout is not search('user:' ~ primary_user ~ ' allow')"
+    - "sandbox_home_acls.results[acl_idx].stdout is not search('[0-9]+: ')"
+
+- name: grant the primary user inherited access on the home directory (after existing acls)
+  ansible.builtin.command:
+    argv:
+      - chmod
+      - +a#
+      - "1"
+      - "{{ sandbox_acl_entry }}"
+      - /Users/{{ item.account }}
+  vars:
+    sandbox_acl_entry: "{{ primary_user }} allow list,search,add_file,add_subdirectory,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit"
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: acl_idx
+    label: "{{ item.account }}"
+  when:
+    - "sandbox_home_acls.results[acl_idx].stdout is not search('user:' ~ primary_user ~ ' allow')"
+    - "sandbox_home_acls.results[acl_idx].stdout is search('[0-9]+: ')"
+
+- name: check sandbox group membership of the primary user
+  ansible.builtin.command: dseditgroup -o checkmember -m {{ primary_user }} {{ item.account }}
+  register: sandbox_group_membership
+  failed_when: false
+  changed_when: false
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"
+
+- name: add the primary user to the sandbox group
+  ansible.builtin.command:
+    argv: [dseditgroup, -o, edit, -a, "{{ primary_user }}", -t, user, "{{ item.account }}"]
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: member_idx
+    label: "{{ item.account }}"
+  when: sandbox_group_membership.results[member_idx].stdout is not search('yes')
+
+- name: install the scoped sudoers drop file
+  # always covers every configured profile, even when this run deployed only
+  # a single one (sandbox_users is filtered, sandbox_all_users is not)
+  ansible.builtin.copy:
+    content: |
+      {{ primary_user }} ALL=({{ sandbox_all_users | map(attribute='account') | join(', ') }}) NOPASSWD: ALL
+    dest: /etc/sudoers.d/workstation-sandboxes
+    owner: root
+    group: wheel
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
+- name: install the minimal .bashrc for each sandbox user
+  ansible.builtin.copy:
+    content: |
+      #!/bin/bash
+      ###############################################################################
+      # WARNING: this file is managed by `guhcampos-workstation`, manually editing it
+      # may be futile as it will be overriden.
+      ###############################################################################
+
+      # Keep the sandbox environment independent of the primary user's dotfiles.
+      case ":${PATH:-}:" in
+        *:/opt/homebrew/bin:*) ;;
+        *) PATH="/opt/homebrew/bin${PATH:+:${PATH}}" ;;
+      esac
+      export PATH
+
+      umask 0002
+    dest: /Users/{{ item.account }}/.bashrc
+    owner: "{{ item.account }}"
+    group: "{{ item.account }}"
+    mode: "0644"
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"
+
+- name: install the minimal .bash_profile for each sandbox user
+  ansible.builtin.copy:
+    content: |
+      #!/bin/bash
+      ###############################################################################
+      # WARNING: this file is managed by `guhcampos-workstation`, manually editing it
+      # may be futile as it will be overriden.
+      ###############################################################################
+
+      source "${HOME}/.bashrc"
+    dest: /Users/{{ item.account }}/.bash_profile
+    owner: "{{ item.account }}"
+    group: "{{ item.account }}"
+    mode: "0644"
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"
+
+- name: create the per-user identity and config directories
+  ansible.builtin.file:
+    path: /Users/{{ entry.0.account }}/{{ entry.1.path }}
+    state: directory
+    owner: "{{ entry.0.account }}"
+    group: "{{ entry.0.account }}"
+    mode: "{{ entry.1.mode }}"
+  vars:
+    sandbox_user_dirs:
+      - { path: .ssh,             mode: "0700" }
+      - { path: .config,          mode: "0755" }
+      - { path: .config/opencode, mode: "0750" }
+      - { path: .local,           mode: "0755" }
+      - { path: .local/state,     mode: "0750" }
+  loop: "{{ sandbox_users | product(sandbox_user_dirs) | list }}"
+  loop_control:
+    loop_var: entry
+    label: "{{ entry.0.account }}/{{ entry.1.path }}"
+
+- name: tighten permissions on the primary user home
+  ansible.builtin.file:
+    path: /Users/{{ primary_user }}
+    state: directory
+    mode: "0700"
+  tags: [home-perms]
+
+- name: install the profile gitconfig
+  # single source of truth is the public dotfiles _gitconfig (referenced via a
+  # repo-relative symlink in the role's files dir; ansible-core 2.20 rejects
+  # src paths that escape the search roots)
+  ansible.builtin.copy:
+    src: gitconfig
+    dest: /Users/{{ item.account }}/.gitconfig
+    owner: "{{ item.account }}"
+    group: "{{ item.account }}"
+    mode: "0644"
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"
+
+- name: create the profile .gitconfig.local when missing
+  ansible.builtin.copy:
+    content: |
+      # profile-specific git configuration (untracked). e.g.:
+      # [user]
+      #     name  = ...
+      #     email = ...
+    dest: /Users/{{ item.account }}/.gitconfig.local
+    owner: "{{ item.account }}"
+    group: "{{ item.account }}"
+    mode: "0600"
+    force: false
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"
+
+- name: enforce 0600 on the profile .gitconfig.local files
+  ansible.builtin.file:
+    path: /Users/{{ item.account }}/.gitconfig.local
+    owner: "{{ item.account }}"
+    group: "{{ item.account }}"
+    mode: "0600"
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.account }}"

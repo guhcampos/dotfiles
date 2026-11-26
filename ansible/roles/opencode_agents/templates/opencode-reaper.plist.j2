@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  WARNING: this file is managed by `guhcampos-workstation`, manually editing it
+  may be futile as it will be overriden.
+-->
+<plist version="1.0">
+{% set ns = namespace(arg="") %}
+{% for u in sandbox_users %}{% set ns.arg = ns.arg ~ u.account ~ ":" ~ u.internal_port %}{% if not loop.last %}{% set ns.arg = ns.arg ~ "," %}{% endif %}{% endfor %}
+<dict>
+    <key>Label</key>
+    <string>workstation.opencode.reaper</string>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/usr/local/bin/workstation/opencode-idle-reaper</string>
+        <string>{{ ns.arg }}</string>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/workstation-opencode-reaper.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/workstation-opencode-reaper.log</string>
+</dict>
+</plist>

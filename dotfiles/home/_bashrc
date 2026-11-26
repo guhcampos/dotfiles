@@ -1,0 +1,27 @@
+#!/bin/bash
+################################################################################
+# Managed by guhcampos-dotfiles.
+# -----------------------------------------------------------------------------
+# Custom configurations go into "${XDG_CONFIG_HOME}/bash.d" and are loaded in
+# natural order. Do not add application specific configuration to this file.
+################################################################################
+
+source /etc/profile
+
+XDG_CONFIG_HOME="${HOME}/.config"
+GUHCAMPOS_BASHD="${XDG_CONFIG_HOME}/bash.d"
+
+# this ensures both `.config` and `.config/bash.d` exisst
+if [[ -x "${GUHCAMPOS_BASHD}" ]]; then
+  mkdir -p "${GUHCAMPOS_BASHD}"
+fi
+
+if [ -e "$XDG_CONFIG_HOME/bash.d" ]; then
+  for lib in "$HOME"/.config/bash.d/*.sh; do
+    # shellcheck disable=SC1090
+    source "$lib"
+  done
+fi
+
+export GUHCAMPOS_BASHD
+export XDG_CONFIG_HOME

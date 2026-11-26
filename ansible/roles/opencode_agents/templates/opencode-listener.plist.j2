@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  WARNING: this file is managed by `guhcampos-workstation`, manually editing it
+  may be futile as it will be overriden.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>workstation.opencode.{{ sandbox_user.profile }}</string>
+
+    <key>UserName</key>
+    <string>{{ sandbox_user.account }}</string>
+
+    <key>GroupName</key>
+    <string>{{ sandbox_user.account }}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/{{ sandbox_user.account }}</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>Sockets</key>
+    <dict>
+        <key>Listeners</key>
+        <dict>
+            <key>SockServiceName</key>
+            <integer>{{ sandbox_user.public_port }}</integer>
+            <key>SockType</key>
+            <string>stream</string>
+            <key>SockFamily</key>
+            <string>IPv4</string>
+        </dict>
+    </dict>
+
+    <key>inetdCompatibility</key>
+    <dict>
+        <key>Wait</key>
+        <false/>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/usr/local/bin/workstation/opencode-connection-shim</string>
+        <string>{{ sandbox_user.account }}</string>
+        <string>{{ sandbox_user.internal_port }}</string>
+        <string>/Users/{{ sandbox_user.account }}/.local/state/opencode-last-activity</string>
+        <string>/Users/{{ sandbox_user.account }}/.config/opencode/agent-password</string>
+    </array>
+
+    <!-- inetd mode: stdin/stdout are the accepted client socket. ONLY stderr is
+         redirected to a log here - overriding stdout would send the bridged
+         server responses to the log instead of back to the client. -->
+    <key>StandardErrorPath</key>
+    <string>/Users/{{ sandbox_user.account }}/.local/state/opencode-shim.log</string>
+</dict>
+</plist>

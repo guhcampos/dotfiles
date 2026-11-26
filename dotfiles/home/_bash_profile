@@ -1,0 +1,11 @@
+#!/bin/bash
+################################################################################
+# Managed by guhcampos-dotfiles.
+# -----------------------------------------------------------------------------
+# - .bash_profile simply reads .bashrc - no other configuration should be here.
+################################################################################
+
+if [[ -f "$HOME"/.bashrc ]]; then
+  # shellcheck disable=SC1091
+  source "${HOME}"/.bashrc
+fi

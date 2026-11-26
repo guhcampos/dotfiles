@@ -1,0 +1,5 @@
+default_context:
+  full_name: "Gustavo Campos"
+  email: "guhcampos@users.noreply.github.com"
+  github_username: "guhcampos"
+cookiecutters_dir: "~/workspace/guhcampos/cookiecutter"

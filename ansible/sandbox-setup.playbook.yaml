@@ -1,0 +1,87 @@
+---
+- name: Workspace Sandboxes Setup
+  hosts: localhost
+  connection: local
+  become: true
+  strategy: linear
+  vars:
+    primary_user: gustavo
+    sandbox_profile: ""
+    sandbox_account_map_reference: "op://secrets-guhcampos/guhcampos-dotfiles/sandbox_codename_mapping"
+    sandbox_profiles:
+      - { profile: alfa,   public_port: 4101, internal_port: 4102 }
+      - { profile: bravo,  public_port: 4103, internal_port: 4104 }
+      - { profile: charlie, public_port: 4105, internal_port: 4106 }
+  pre_tasks:
+    - name: read the sandbox account map from 1Password
+      ansible.builtin.command:
+        argv:
+          - op
+          - read
+          - "{{ sandbox_account_map_reference }}"
+      register: sandbox_account_map_command
+      changed_when: false
+      failed_when: false
+      become: false
+      no_log: true
+
+    - name: verify that the 1Password account map was read
+      ansible.builtin.assert:
+        that: sandbox_account_map_command.rc == 0
+        fail_msg: "Could not read the sandbox account map from 1Password; unlock the CLI and check the secret reference."
+
+    - name: parse the sandbox account map YAML
+      ansible.builtin.set_fact:
+        sandbox_account_map: "{{ sandbox_account_map_command.stdout | from_yaml }}"
+      no_log: true
+
+    - name: validate the sandbox account map
+      ansible.builtin.assert:
+        that:
+          - sandbox_account_map is mapping
+          - sandbox_account_map | length > 0
+        fail_msg: "The 1Password sandbox account map must contain a YAML mapping."
+
+    - name: resolve local macOS account names for sandbox profiles
+      ansible.builtin.set_fact:
+        sandbox_all_users: >-
+          {{ sandbox_all_users | default([]) +
+             [item | combine({
+               'account': sandbox_account_map.get(item.profile, item.profile)
+             })] }}
+      loop: "{{ sandbox_profiles }}"
+      loop_control:
+        label: "{{ item.profile }}"
+      no_log: true
+
+    - name: reject account mappings for unknown sandbox profiles
+      ansible.builtin.assert:
+        that: >-
+          sandbox_account_map.keys()
+          | difference(sandbox_profiles | map(attribute='profile') | list)
+          | length == 0
+        fail_msg: "sandbox_account_map contains a key that is not a configured profile"
+
+    - name: reject duplicate local macOS account names
+      ansible.builtin.assert:
+        that: >-
+          sandbox_all_users | map(attribute='account') | list | unique | length
+          == sandbox_all_users | length
+        fail_msg: "each sandbox profile must resolve to a unique macOS account"
+
+    - name: reject unknown sandbox profile names
+      ansible.builtin.assert:
+        that: "sandbox_profile | length == 0 or sandbox_profile in (sandbox_profiles | map(attribute='profile') | list)"
+        fail_msg: "unknown sandbox profile '{{ sandbox_profile }}' (expected one of: {{ sandbox_profiles | map(attribute='profile') | join(', ') }})"
+
+    - name: filter the user list when a single sandbox profile is requested
+      ansible.builtin.set_fact:
+        sandbox_users: "{{ sandbox_all_users | selectattr('profile', 'equalto', sandbox_profile) | list }}"
+      when: sandbox_profile | length > 0
+    - name: use all resolved sandbox profiles when no single profile is requested
+      ansible.builtin.set_fact:
+        sandbox_users: "{{ sandbox_all_users }}"
+      when: sandbox_profile | length == 0
+  roles:
+    - role: sandbox_users
+    - role: opencode_agents

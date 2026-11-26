@@ -1,0 +1,155 @@
+---
+###############################################################################
+# per-user on-demand opencode agents: launchd listener (public port) -> shim ->
+# opencode serve (internal port) -> shared idle reaper daemon.
+###############################################################################
+
+- name: create the workstation script directory under /usr/local/bin
+  ansible.builtin.file:
+    path: /usr/local/bin/workstation
+    state: directory
+    owner: root
+    group: wheel
+    mode: "0755"
+
+- name: install the opencode connection shim
+  ansible.builtin.template:
+    src: opencode-connection-shim.sh
+    dest: /usr/local/bin/workstation/opencode-connection-shim
+    owner: root
+    group: wheel
+    mode: "0755"
+
+- name: install the opencode idle reaper
+  ansible.builtin.template:
+    src: opencode-idle-reaper.sh
+    dest: /usr/local/bin/workstation/opencode-idle-reaper
+    owner: root
+    group: wheel
+    mode: "0755"
+
+- name: create the per-user state directories
+  ansible.builtin.file:
+    path: /Users/{{ item.account }}/.local/state
+    state: directory
+    owner: "{{ item.account }}"
+    group: "{{ item.account }}"
+    mode: "0750"
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.profile }}"
+
+- name: check whether the fixed agent password already exists
+  ansible.builtin.stat:
+    path: /Users/{{ item.account }}/.config/opencode/agent-password
+  loop: "{{ sandbox_users }}"
+  register: sandbox_agent_password_check
+
+- name: generate the fixed agent password for each sandbox user
+  # fixed password (not per-boot random) so the primary user's clients can
+  # authenticate; group-readable by design - the primary user is in the group
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.password', '/dev/null chars=ascii_letters,digits length=43') }}\n"
+    dest: /Users/{{ item.account }}/.config/opencode/agent-password
+    owner: "{{ item.account }}"
+    group: "{{ item.account }}"
+    mode: "0440"
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: password_idx
+    label: "{{ item.profile }}"
+  when: not sandbox_agent_password_check.results[password_idx].stat.exists
+
+- name: create the local bin directory for user wrappers
+  ansible.builtin.file:
+    path: "/Users/{{ primary_user }}/.local/bin"
+    state: directory
+    owner: "{{ primary_user }}"
+    group: staff
+    mode: "0755"
+
+- name: install the opencode client wrapper
+  ansible.builtin.template:
+    src: opencode-client.sh
+    dest: "/Users/{{ primary_user }}/.local/bin/opencode-client"
+    owner: "{{ primary_user }}"
+    group: staff
+    mode: "0755"
+  vars:
+    sandbox_users: "{{ sandbox_all_users }}"
+
+- name: install the opencode ACP client wrapper
+  ansible.builtin.template:
+    src: opencode-acp-client.sh
+    dest: "/Users/{{ primary_user }}/.local/bin/opencode-acp-client"
+    owner: "{{ primary_user }}"
+    group: staff
+    mode: "0755"
+  vars:
+    sandbox_users: "{{ sandbox_all_users }}"
+
+- name: remove obsolete opencode scripts from libexec
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /usr/local/libexec/workstation/opencode-connection-shim
+    - /usr/local/libexec/workstation/opencode-idle-reaper
+    - /usr/local/libexec/workstation/opencode-client
+
+- name: install the launchd listener for each sandbox agent
+  ansible.builtin.template:
+    src: opencode-listener.plist.j2
+    dest: "/Library/LaunchDaemons/workstation.opencode.{{ item.profile }}.plist"
+    owner: root
+    group: wheel
+    mode: "0644"
+  register: sandbox_listener_install
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    label: "{{ item.profile }}"
+  vars:
+    sandbox_user: "{{ item }}"
+
+- name: install the opencode idle reaper launchd daemon
+  # the reaper must know every configured profile, even when this run
+  # deployed only a single one (sandbox_users is filtered)
+  ansible.builtin.template:
+    src: opencode-reaper.plist.j2
+    dest: /Library/LaunchDaemons/workstation.opencode.reaper.plist
+    owner: root
+    group: wheel
+    mode: "0644"
+  register: sandbox_reaper_install
+  vars:
+    sandbox_users: "{{ sandbox_all_users }}"
+
+- name: unload the sandbox listener daemons whose plists changed
+  ansible.builtin.command: launchctl bootout system/workstation.opencode.{{ item.profile }}
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: listener_idx
+    label: "{{ item.profile }}"
+  when: sandbox_listener_install.results[listener_idx].changed
+  failed_when: false
+  changed_when: false
+
+- name: unload the reaper daemon when its plist changed
+  ansible.builtin.command: launchctl bootout system/workstation.opencode.reaper
+  when: sandbox_reaper_install.changed
+  failed_when: false
+  changed_when: false
+
+- name: load the sandbox listener daemons whose plists changed
+  ansible.builtin.command: launchctl bootstrap system /Library/LaunchDaemons/workstation.opencode.{{ item.profile }}.plist
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: listener_idx
+    label: "{{ item.profile }}"
+  when: sandbox_listener_install.results[listener_idx].changed
+  changed_when: true
+
+- name: load the reaper daemon when its plist changed
+  ansible.builtin.command: launchctl bootstrap system /Library/LaunchDaemons/workstation.opencode.reaper.plist
+  when: sandbox_reaper_install.changed
+  changed_when: true
