@@ -6,6 +6,7 @@
 # natural order. Do not add application specific configuration to this file.
 ################################################################################
 
+# shellcheck disable=SC1091
 source /etc/profile
 
 XDG_CONFIG_HOME="${HOME}/.config"

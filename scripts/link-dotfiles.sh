@@ -1,90 +1,62 @@
 #!/bin/bash
-# links every file under dotfiles/home into $HOME. existing real files are
-# renamed in place to <name>.backup.<date>, never deleted.
-set -u
+# Links files under dotfiles/home into $HOME. Existing real files are backed up.
+set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ts="$(date +%Y%m%d-%H%M%S)"
+timestamp="$(date +%Y%m%d-%H%M%S)"
+
 declare -a repointed=() backed_up=() created=()
 
 link_file() {
-  local src="$1" dest="$2"
+  local src="$1" dest="$2" current_link backup
   mkdir -p "$(dirname "$dest")"
-  if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]; then
-    return 0
-  fi
+
   if [ -L "$dest" ]; then
-    ln -sfn "$src" "$dest"
-    repointed+=("$dest")
-  elif [ -e "$dest" ]; then
-    mv "$dest" "${dest}.backup.${ts}"
-    backed_up+=("${dest}.backup.${ts}")
-    ln -s "$src" "$dest"
-    created+=("$dest")
-  else
-    ln -s "$src" "$dest"
-    created+=("$dest")
+    current_link="$(readlink "$dest")"
+    case "$current_link" in
+    "$src")
+      printf 'link-dotfiles: already linked %s\n' "$dest"
+      return 0
+      ;;
+    *)
+      printf 'link-dotfiles: updating link %s\n' "$dest"
+      ln -sfn "$src" "$dest"
+      repointed+=("$dest")
+      return 0
+      ;;
+    esac
   fi
+
+  if [ -e "$dest" ]; then
+    backup="${dest}.backup.${timestamp}"
+    printf 'link-dotfiles: backing up %s as %s\n' "$dest" "$backup"
+    mv "$dest" "$backup"
+    backed_up+=("$backup")
+  fi
+
+  printf 'link-dotfiles: linking %s -> %s\n' "$dest" "$src"
+  ln -s "$src" "$dest"
+  created+=("$dest")
 }
 
 map_rel() {
-  # maps the underscore prefix to a dot on every path component
-  local out="" part
-  local IFS='/'
-  for part in $1; do
-    [[ "$part" == _* ]] && part=".${part:1}"
-    out="${out:+$out/}$part"
-  done
-  printf '%s' "$out"
+  # Turn an underscore-prefixed path component into a dot-prefixed component.
+  printf '%s\n' "$1" | sed -E 's#^_#.#; s#/_#/.#g'
 }
 
+printf 'link-dotfiles: scanning %s\n' "$repo/dotfiles/home"
+# NUL-delimited paths handle spaces; process substitution keeps counters here.
 while IFS= read -r -d '' src; do
-  rel="${src#"$repo"/dotfiles/home/}"
+  rel="${src#"$repo/dotfiles/home/"}"
   rel="$(map_rel "$rel")"
   link_file "$src" "${HOME}/${rel}"
 done < <(find "$repo/dotfiles/home" -type f -print0)
 
-# vscode: link the custom css into the user dir and register it in settings.json
-vscode_user="${HOME}/Library/Application Support/Code/User"
-if [ -d "$vscode_user" ]; then
-  link_file "$repo/vscode/css/markdown.css" "$vscode_user/markdown.css"
-  python3 - "$vscode_user/settings.json" "$vscode_user/markdown.css" <<'PY'
-import json, os, re, shutil, sys
-from urllib.request import pathname2url
-settings_path, css_path = sys.argv[1], sys.argv[2]
-raw = ""
-if os.path.exists(settings_path):
-    with open(settings_path) as fh:
-        raw = fh.read()
-settings = {}
-if raw.strip():
-    cleaned = re.sub(r",\s*([}\]])", r"\1", raw)
-    try:
-        settings = json.loads(cleaned)
-    except Exception as exc:
-        print(f"vscode: cannot parse {settings_path} ({exc}); settings left untouched", file=sys.stderr)
-        sys.exit(0)
-imports = settings.setdefault("vscode_custom_css.imports", [])
-url = "file://" + pathname2url(os.path.realpath(css_path))
-needs_update = url not in imports or settings.get("vscode_custom_css.enabled") is not True
-if needs_update:
-    if url not in imports:
-        imports.append(url)
-    settings["vscode_custom_css.enabled"] = True
-    if os.path.exists(settings_path):
-        shutil.copy2(settings_path, settings_path + ".backup")
-    with open(settings_path, "w") as fh:
-        json.dump(settings, fh, indent=2)
-PY
-else
-  echo "vscode: no VSCode user dir found, skipping css install"
-fi
-
-# Avoid crawling the entire home directory to find stale links. This target only
-# creates or updates links for files that still exist in the repository.
-
-echo "link-dotfiles: created ${#created[@]}, repointed ${#repointed[@]}, backed up ${#backed_up[@]}"
+# Stale links for removed source files are left alone; we don't scan all of $HOME.
+printf 'link-dotfiles: created %d, repointed %d, backed up %d\n' \
+  "${#created[@]}" "${#repointed[@]}" "${#backed_up[@]}"
 if [ "${#backed_up[@]}" -gt 0 ]; then
-  for f in "${backed_up[@]}"; do echo "  backup: $f"; done
+  for backup in "${backed_up[@]}"; do
+    printf 'link-dotfiles: backup %s\n' "$backup"
+  done
 fi
-exit 0

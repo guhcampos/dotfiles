@@ -42,8 +42,5 @@ sandbox:
 %:
 	@:
 
-.PHONY: sandbox-cleanup-legacy
-sandbox-cleanup-legacy:
-	cd ansible && $(ANSIBLE) -i 'localhost,' -K cleanup-legacy-sandboxes.playbook.yaml
 
 .DEFAULT_GOAL=dotfiles

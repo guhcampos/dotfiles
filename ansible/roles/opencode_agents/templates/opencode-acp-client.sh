@@ -1,27 +1,20 @@
 #!/bin/bash
-###############################################################################
-# WARNING: this file is managed by `guhcampos-workstation`, manually editing it
-# may be futile as it will be overridden.
-#
+################################################################################
+# WARNING: managed by ansible @ https://github.com/guhcampos/dotfiles
+# Manual edits may be overwritten.
+# -----------------------------------------------------------------------------
 # ACP client wrapper: starts OpenCode's stdio Agent Client Protocol adapter as
 # the selected sandbox user. ACP uses a private server for this process rather
 # than the launchd-managed shared HTTP server.
 #
 # usage: opencode-acp-client <profile-or-account>
-###############################################################################
+################################################################################
 
 set -u
 
 selector="${1:?usage: opencode-acp-client <profile-or-account>}"
 account=""
 
-# Prefer profile IDs if a local account name happens to overlap one.
-case "${selector}" in
-{% for u in sandbox_users %}
-    "{{ u.profile }}") account="{{ u.account }}" ;;
-{% endfor %}
-    *) ;;
-esac
 
 # Also accept the mapped local macOS account name.
 if [ -z "${account}" ]; then

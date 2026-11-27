@@ -31,21 +31,22 @@ repos:
     hooks:
       - id: shellcheck
         args: [--shell=bash]
-        files: ^(scripts/.*\.sh|dotfiles/home/_config/bash\.d/.*\.sh|dotfiles/home/_(bash_profile|bashrc|profile))$
-        types: [file]
+        files: ^(scripts/|dotfiles/home/)
+        types: [shell]
 
   - repo: https://github.com/scop/pre-commit-shfmt
     rev: v3.14.1-1
     hooks:
       - id: shfmt
         args: [-ln=bash, -i=2]
-        files: ^(scripts/.*\.sh|dotfiles/home/_config/bash\.d/.*\.sh|dotfiles/home/_(bash_profile|bashrc|profile))$
-        types: [file]
+        files: ^(scripts/|dotfiles/home/)
+        types: [shell]
 
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.50.1
     hooks:
       - id: markdownlint
+        exclude: '(^|/)(AGENTS|README)\.md$'
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1

@@ -1,6 +1,9 @@
-[user]
-	name = Gustavo Campos
-	email = guhcampos@users.noreply.github.com
+################################################################################
+# WARNING: managed by ansible @ https://github.com/guhcampos/dotfiles
+# local modifications will be lost upon playbook execution
+# -----------------------------------------------------------------------------
+# - use `.gitconfig.local` for local overrides
+################################################################################
 
 [color]
 	ui = auto
@@ -32,13 +35,11 @@
 
 [credential "https://github.com"]
 	helper =
-	helper = !/opt/homebrew/bin/gh auth git-credential
+	helper = !gh auth git-credential
+
 [credential "https://gist.github.com"]
 	helper =
-	helper = !/opt/homebrew/bin/gh auth git-credential
+	helper = !gh auth git-credential
 
-# machine- and identity-specific configuration (employer workspace includes,
-# forgejo credentials, per-machine overrides) lives in an untracked local file;
-# a missing include file is silently ignored by git.
 [include]
 	path = ~/.gitconfig.local

@@ -1,0 +1,14 @@
+################################################################################
+# WARNING: managed by ansible @ https://github.com/guhcampos/dotfiles
+# local modifications will be lost upon playbook execution
+# -----------------------------------------------------------------------------
+# - prompt colors are sandbox-specific and provided from secret mapping
+################################################################################
+
+format = "$all"
+
+[username]
+show_always = true
+style_user = "bold fg:{{ item.prompt_color }}"
+style_root = "bold fg:{{ item.prompt_color }}"
+format = "[$user]($style) "

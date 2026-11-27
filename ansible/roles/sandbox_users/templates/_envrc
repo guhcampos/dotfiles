@@ -1,8 +1,8 @@
 #!/bin/bash
 ###############################################################################
-# WARNING: the `source_env` line below is managed by `guhcampos-workstation`
-# and is re-enforced on every run. it must stay at the top: workspace-specific
-# entries can be added below it and will be preserved.
+# WARNING: the `source_env` line below is managed by
+# https://github.com/guhcampos/dotfiles and re-enforced on every run. Keep it
+# at the top; workspace-specific entries below it are preserved.
 ###############################################################################
 
-source_env .env.secrets
+source_env .env

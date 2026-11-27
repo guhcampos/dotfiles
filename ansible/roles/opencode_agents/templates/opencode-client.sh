@@ -1,15 +1,15 @@
 #!/bin/bash
-###############################################################################
-# WARNING: this file is managed by `guhcampos-workstation`, manually editing it
-# may be futile as it will be overriden.
-#
+################################################################################
+# WARNING: managed by ansible @ https://github.com/guhcampos/dotfiles
+# Manual edits may be overwritten.
+# -----------------------------------------------------------------------------
 # opencode client wrapper: connects your local opencode TUI to a sandbox
 # user's on-demand agent server, supplying the fixed agent password from the
 # sandbox home. Running this as the primary user also wakes the server up:
 # the launchd listener spawns it on the first connection.
 #
 # usage: opencode-client <profile-or-account>
-###############################################################################
+################################################################################
 
 set -u
 
@@ -17,13 +17,6 @@ selector="${1:?usage: opencode-client <profile-or-account>}"
 account=""
 port=""
 
-# Prefer profile IDs if a local account name happens to overlap one.
-case "${selector}" in
-{% for u in sandbox_users %}
-    "{{ u.profile }}") account="{{ u.account }}"; port={{ u.public_port }} ;;
-{% endfor %}
-    *) ;;
-esac
 
 # Also accept the mapped local macOS account name.
 if [ -z "${account}" ]; then

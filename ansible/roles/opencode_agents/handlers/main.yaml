@@ -1,0 +1,30 @@
+---
+- name: Unload changed sandbox listener daemons
+  ansible.builtin.command: launchctl bootout system/workstation.opencode.{{ item.profile }}
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: listener_idx
+    label: "{{ item.profile }}"
+  when: opencode_agents_sandbox_listener_install.results[listener_idx].changed
+  failed_when: false
+  changed_when: false
+
+- name: Unload the reaper daemon
+  ansible.builtin.command: launchctl bootout system/workstation.opencode.reaper
+  when: opencode_agents_sandbox_reaper_install.changed
+  failed_when: false
+  changed_when: false
+
+- name: Load changed sandbox listener daemons
+  ansible.builtin.command: launchctl bootstrap system /Library/LaunchDaemons/workstation.opencode.{{ item.profile }}.plist
+  loop: "{{ sandbox_users }}"
+  loop_control:
+    index_var: listener_idx
+    label: "{{ item.profile }}"
+  when: opencode_agents_sandbox_listener_install.results[listener_idx].changed
+  changed_when: true
+
+- name: Load the reaper daemon
+  ansible.builtin.command: launchctl bootstrap system /Library/LaunchDaemons/workstation.opencode.reaper.plist
+  when: opencode_agents_sandbox_reaper_install.changed
+  changed_when: true

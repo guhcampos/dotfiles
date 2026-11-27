@@ -16,3 +16,9 @@ This is a **human** owned repository: _some_ limitations to agent behavior apply
 - **Never** make changes to `AGENTS.md` (this file) - strictly user owned.
 - **Never** make changes to `README.md` - strictly user owned. You may **suggest** changes, but not edit it directly.
 - You may **suggest** new agent skills - with explicitly human review.
+
+
+## WHEN MAKING CHANGES
+
+- Suggest changes to documentation when your changes invalidate existing docs.
+- Keep it Simple: this is not an application repository, if a feature becomes unreasonably complex, it does not belong here.

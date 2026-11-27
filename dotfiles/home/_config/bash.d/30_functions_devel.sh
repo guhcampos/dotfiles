@@ -28,7 +28,7 @@ function cdev_mac {
     -e 'out$' \
     -e '.pytest_cache$' \
     -e 'tmp$' |
-    while read _; do
+    while IFS= read -r _; do
       echo "# $(date) > ${*}"
       bash -c "${*}"
     done
