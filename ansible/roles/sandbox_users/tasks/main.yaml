@@ -224,32 +224,6 @@
   loop_control:
     label: "{{ item.account }}"
 
-- name: Strip the acl entries from the desktop-oriented template directories
-  # the macOS user template ships e.g. Pictures with a "group:everyone deny
-  # delete" ace, which blocks removal even for root; strip acls before deleting
-  ansible.builtin.command: chmod -N /Users/{{ entry.0.account }}/{{ entry.1 }}
-  vars:
-    home_template_dirs: [Desktop, Documents, Downloads, Movies, Music, Public]
-  failed_when: false
-  changed_when: false
-  loop: "{{ sandbox_users | product(home_template_dirs) | list }}"
-  loop_control:
-    loop_var: entry
-    label: "{{ entry.0.account }}/{{ entry.1 }}"
-
-- name: Remove the desktop-oriented template directories from the sandbox homes
-  # these come from the macOS user template when the account/home is created;
-  # headless agent accounts have no GUI session to recreate them. ~/Library is
-  # kept on purpose (cfprefsd, app caches, opencode state live there).
-  vars:
-    home_template_dirs: [Desktop, Documents, Downloads, Movies, Music, Public]
-  ansible.builtin.file:
-    path: /Users/{{ entry.0.account }}/{{ entry.1 }}
-    state: absent
-  loop: "{{ sandbox_users | product(home_template_dirs) | list }}"
-  loop_control:
-    loop_var: entry
-    label: "{{ entry.0.account }}/{{ entry.1 }}"
 
 - name: Check for legacy per-profile secret environment files
   ansible.builtin.stat:
